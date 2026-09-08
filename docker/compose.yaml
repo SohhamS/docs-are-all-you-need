@@ -1,0 +1,39 @@
+# Phase 1: one service. No Redis, no Postgres, no Kubernetes.
+#
+# The seams for those exist in the code, but building them before they are
+# needed costs time and buys nothing. See SKILLS.md, "Move to Postgres, Redis
+# or Kubernetes", for the steps when the time comes.
+
+services:
+  dv:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: docverify:local
+    env_file:
+      - ../.env
+    environment:
+      # Anything in config/default.yaml can be overridden here without
+      # editing the file. This is the same mechanism a ConfigMap plus env:
+      # entries would use later.
+      DV_CONFIG: /app/config/default.yaml
+      # DV__STAGES__INVESTIGATE__CONCURRENCY: "16"
+      # DV__LLM__LIMITER__MAX_IN_FLIGHT: "4"
+      # DV__LLM__DEFAULT_PROVIDER: "internal"
+      # DV__CODETOOLS__KIND: "mcp"
+    volumes:
+      # Config, editable without a rebuild.
+      - ../config:/app/config:ro
+      # Prompts, likewise. Prompt iteration should not need an image build.
+      - ../prompts:/app/prompts:ro
+      # Run state. Without this volume, every restart loses your runs.
+      - ../data:/app/data
+      # Documents to verify, dropped in from the host.
+      - ../data/inbox:/docs:ro
+      # The repository under verification, read-only. Only needed if the
+      # code tools read a local checkout rather than calling a remote server.
+      # - ${CODE_REPO_PATH:-/nonexistent}:/repo:ro
+    ports:
+      - "8000:8000"
+    command: ["serve"]
+    restart: unless-stopped

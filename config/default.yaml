@@ -1,0 +1,139 @@
+# docverify configuration.
+#
+# Any value here can be overridden by an environment variable using the DV__
+# prefix and __ as the nesting separator, so a container can be retuned
+# without touching this file:
+#
+#   docker run -e DV__STAGES__INVESTIGATE__CONCURRENCY=16 ...
+#
+# Secrets do NOT belong here. They come from the environment; see .env.example.
+
+log_level: INFO
+log_json: false
+prompts_dir: prompts
+
+run:
+  # How many documents are processed at once. A THROUGHPUT knob, not a safety
+  # mechanism. Sequencing documents does not bound LLM load, because the
+  # fan-out to parallel claims happens inside a document. The real throttle is
+  # llm.limiter below.
+  docs_concurrency: 1
+  fail_run_on_doc_error: false
+
+ingest:
+  max_file_mb: 25
+  accept_formats: [docx, pdf, html, md, txt]
+  # A PDF with no usable text layer is refused rather than OCR'd. Claims
+  # generated from garbled text still produce confident-looking verdicts.
+  reject_scanned_pdf: true
+  min_extractable_chars_per_page: 40
+
+llm:
+  # The only load control that matters. Set max_in_flight to what the
+  # inference endpoint can actually take.
+  limiter:
+    max_in_flight: 8
+    requests_per_second: 4.0
+
+  default_provider: fake
+
+  providers:
+    # Scripted responses. No network. Used by tests and `make smoke`.
+    fake:
+      kind: fake
+      model: fake
+
+    # An internal endpoint speaking the OpenAI chat-completions shape.
+    # Most vLLM / TGI / NIM deployments do.
+    internal:
+      kind: openai_compat
+      base_url: ${DV_INTERNAL_LLM_BASE_URL}
+      model: nemotron-120b
+      api_key_env: DV_INTERNAL_LLM_API_KEY
+      timeout_s: 180
+      max_retries: 3
+      # Retries specifically for malformed structured output. Quantised
+      # models produce invalid JSON more often than they reason badly.
+      schema_retries: 2
+
+    # gemini:
+    #   kind: gemini
+    #   model: gemini-2.0-flash
+    #   api_key_env: DV_GEMINI_API_KEY
+
+tracing:
+  # Langfuse. Optional, and the application runs correctly with it off.
+  # Traces and reasoning go here; state and results go to the store. Nothing
+  # the product depends on may live only in a trace.
+  enabled: false
+
+codetools:
+  # `fake` uses an in-memory repository. Switch to `mcp` once the code access
+  # server is available and satisfies docs/mcp-tool-spec.md.
+  kind: fake
+  repo: org/product
+  # Resolved to a commit SHA once at run start. Every tool call and every
+  # citation in the run then uses that SHA, not this name.
+  branch: main
+  mcp_url_env: DV_CODETOOLS_MCP_URL
+  mcp_token_env: DV_CODETOOLS_MCP_TOKEN
+  timeout_s: 60
+
+store:
+  kind: sqlite
+  dsn: data/docverify.db
+
+bus:
+  kind: inmemory
+  max_queue_size: 10000
+
+stages:
+  classify:
+    concurrency: 2
+    provider: null        # falls back to llm.default_provider
+    prompt_version: v1
+    temperature: 0.0
+    max_tokens: 4096
+    timeout_s: 180
+    max_attempts: 3
+
+  investigate:
+    concurrency: 8
+    provider: null
+    prompt_version: v1
+    temperature: 0.0
+    max_tokens: 4096
+    timeout_s: 300
+    max_attempts: 3
+    # Hard ceiling per claim. Exhausting it yields UNVERIFIABLE, never a
+    # guessed answer.
+    max_tool_calls: 20
+    # Above 1: run N times and treat citation disagreement as an UNVERIFIABLE
+    # signal. Leave at 1 until a labelled set exists to show it helps.
+    samples: 1
+
+  evidence:
+    concurrency: 8
+    provider: null
+    prompt_version: v1
+    temperature: 0.0
+    max_tokens: 2048
+    timeout_s: 180
+    max_attempts: 3
+    # A citation spanning more lines than this is a gesture at a file, not
+    # evidence for a claim.
+    max_span_lines: 400
+    require_at_least_one: true
+
+  judge:
+    concurrency: 4
+    provider: null
+    prompt_version: v1
+    temperature: 0.0
+    max_tokens: 2048
+    timeout_s: 180
+    max_attempts: 3
+
+api:
+  host: 0.0.0.0
+  port: 8000

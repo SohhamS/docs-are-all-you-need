@@ -1,0 +1,74 @@
+[project]
+name = "docverify"
+version = "0.1.0"
+description = "Verifies documentation claims against source code."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "structlog>=24.1",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13.7",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+# Document parsers. Split out so a contributor working on one format does not
+# need the whole set installed.
+ingest = [
+    "python-docx>=1.1",
+    "pymupdf>=1.24",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+    "markdown-it-py>=3.0",
+]
+# Optional tracing. The application must run correctly without it.
+tracing = ["langfuse>=2.40"]
+# Optional agent harness for the investigate stage only. See ADR 0001.
+agent = ["langgraph>=0.2", "langchain-core>=0.3"]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+dv = "docverify.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docverify"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "T20"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+packages = ["docverify"]
+# Stubs raise NotImplementedError; that is intentional while the skeleton is
+# being filled in.
+disable_error_code = ["empty-body"]
+
+[[tool.mypy.overrides]]
+module = ["fitz.*", "docx.*", "langfuse.*", "langgraph.*"]
+ignore_missing_imports = true
